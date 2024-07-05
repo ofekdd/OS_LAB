@@ -5,14 +5,33 @@
 #include <linux/mpi.h>
 #include <asm/uaccess.h>
 
+/**
+ * sys_mpi_poll - Polls for messages from a list of pids within a given timeout period
+ * @poll_pids: Pointer to an array of mpi_poll_entry structures containing the pids to poll
+ * @npids: Number of pids in the poll_pids array
+ * @timeout: Timeout value in jiffies for how long to wait for messages
+ *
+ * This function checks for incoming messages from a list of process IDs (pids). If messages 
+ * are found from any of the specified pids, it updates the incoming field of the corresponding 
+ * mpi_poll_entry structure. If no messages are found, the current process is put to sleep 
+ * until a message is received or the timeout expires. The function returns the number of 
+ * messages found or a negative error code on failure.
+ *
+ * Return: Number of messages found on success, or a negative error code on failure.
+ *         -EINVAL if npids is less than 1 or timeout is negative.
+ *         -EPERM if the current process is not registered for MPI.
+ *         -ENOMEM if memory allocation for watched_pids fails.
+ *         -EFAULT if copying from user space fails.
+ *         -ETIMEDOUT if no message arrives before the timeout.
+ */
 int sys_mpi_poll(struct mpi_poll_entry *poll_pids, int npids, int timeout)
 {
     printk(KERN_INFO "ERANROI - POLL: Entered sys_mpi_poll\n");
-    if (npids < 1 || timeout < 0){
+    if (npids < 1 || timeout < 0) {
         printk(KERN_ERR "ERANROI - Invalid arguments: npids = %d, timeout = %d\n", npids, timeout);
         return -EINVAL;
     }
-    if (current->mpi_registered == 0){
+    if (current->mpi_registered == 0) {
         printk(KERN_ERR "ERANROI - Current process not registered for MPI\n");
         return -EPERM;
     }
@@ -35,9 +54,8 @@ int sys_mpi_poll(struct mpi_poll_entry *poll_pids, int npids, int timeout)
         cur_pid_queue = list_entry(q_it, struct pid_queue, l_idx);
         cur_sender_pid = cur_pid_queue->sender_pid;
         printk(KERN_INFO "ERANROI - Checking sender_pid = %d\n", cur_sender_pid);
-        for (i = 0; i < npids; ++i)
-        {
-            if (cur_sender_pid == poll_pids[i].pid){
+        for (i = 0; i < npids; ++i) {
+            if (cur_sender_pid == poll_pids[i].pid) {
                 found++;
                 poll_pids[i].incoming = 1;
                 printk(KERN_INFO "ERANROI - Message found from pid = %d\n", cur_sender_pid);
@@ -53,16 +71,16 @@ int sys_mpi_poll(struct mpi_poll_entry *poll_pids, int npids, int timeout)
     printk(KERN_INFO "ERANROI - No messages found, going to sleep\n");
     printk(KERN_INFO "ERANROI - Allocating memory for watched_pids\n");
     current->watched_pids = kmalloc(sizeof(pid_t) * npids, GFP_KERNEL);
-    if (!current->watched_pids){
+    if (!current->watched_pids) {
         printk(KERN_ERR "ERANROI - ENOMEM: Could not allocate memory for watched_pids\n");
         return -ENOMEM;
     }
 
     printk(KERN_INFO "ERANROI - Copying pids from user space\n");
-    for (i = 0; i < npids; ++i){
+    for (i = 0; i < npids; ++i) {
         fail_cp = copy_from_user(&current->watched_pids[i], &poll_pids[i].pid, sizeof(pid_t));
         printk(KERN_INFO "ERANROI - current->watched_pids[%d] = %d\n", i, current->watched_pids[i]);
-        if (fail_cp){
+        if (fail_cp) {
             printk(KERN_ERR "ERANROI - EFAULT: Failed to copy from user space\n");
             kfree(current->watched_pids);
             return -EFAULT;
@@ -89,7 +107,7 @@ int sys_mpi_poll(struct mpi_poll_entry *poll_pids, int npids, int timeout)
 
     printk(KERN_INFO "ERANROI - Woken up by message from sender_pid = %d\n", current->sender_pid);
     for (i = 0; i < npids; ++i) {
-        if (current->sender_pid == poll_pids[i].pid){
+        if (current->sender_pid == poll_pids[i].pid) {
             poll_pids[i].incoming = 1;
             printk(KERN_INFO "ERANROI - Incoming message from pid = %d\n", current->sender_pid);
             return 1;
