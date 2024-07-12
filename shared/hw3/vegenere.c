@@ -124,6 +124,39 @@ void cleanup_module(void)
     // Unregister the character device
     unregister_chrdev(my_major, MY_DEVICE);
 
+    // Release inode_list dynamically allocated memory
+    list_t *idi_it, *idi_it_n;
+    struct minor_di* cur_minor_di;
+
+    list_for_each_safe(idi_it, idi_it_n, &inode_list) {
+        cur_minor_di = list_entry(idi_it, struct minor_di, l_idx);
+
+        if (cur_minor_di->di) {
+            printk(KERN_INFO "vegenere: Freeing device info for minor %u\n", cur_minor_di->minor);
+
+            if (cur_minor_di->di->data) {
+                printk(KERN_INFO "vegenere: Freeing data buffer for minor %u\n", cur_minor_di->minor);
+                kfree(cur_minor_di->di->data);
+                cur_minor_di->di->data = NULL;
+            }
+
+            if (cur_minor_di->di->key) {
+                printk(KERN_INFO "vegenere: Freeing key buffer for minor %u\n", cur_minor_di->minor);
+                kfree(cur_minor_di->di->key);
+                cur_minor_di->di->key = NULL;
+            }
+
+            printk(KERN_INFO "vegenere: Freeing device_info struct for minor %u\n", cur_minor_di->minor);
+            kfree(cur_minor_di->di);
+            cur_minor_di->di = NULL;
+        }
+
+        printk(KERN_INFO "vegenere: Freeing minor_di structure for minor %u\n", cur_minor_di->minor);
+        list_del(&cur_minor_di->l_idx);
+        kfree(cur_minor_di);
+        cur_minor_di = NULL;
+    }
+
     printk(KERN_INFO "vegenere: Module cleanup complete\n");
 }
 
@@ -134,23 +167,26 @@ int my_open(struct inode *inode, struct file *filp)
     printk(KERN_INFO "vegenere: Opening device\n");
 
     int found = 0;
-    struct device_info* di;
-    struct minor_di* cur_minor_di;
-    list_t *q_it; // Current queue iterator
-    list_for_each(q_it, &inode_list){
+    struct device_info* di = NULL;
+    struct minor_di* cur_minor_di = NULL;
+    list_t *q_it; // current queue iterator
+
+    list_for_each(q_it, &inode_list) {
         cur_minor_di = list_entry(q_it, struct minor_di, l_idx);
-        if (MINOR(inode->i_rdev) == cur_minor_di->minor){
+        if (MINOR(inode->i_rdev) == cur_minor_di->minor) {
             found = 1;
             filp->private_data = cur_minor_di->di;
             di = cur_minor_di->di;
+            printk(KERN_INFO "vegenere: Found existing device_info for minor %u\n", cur_minor_di->minor);
             break;
         }
     }
 
-    if (!found){
+    if (!found) {
+        printk(KERN_INFO "vegenere: Creating new device_info\n");
         di = (struct device_info*)kmalloc(sizeof(struct device_info), GFP_KERNEL);
         if (!di) {
-            printk(KERN_ERR "vegenere: Memory allocation for device_info failed\n");
+            printk(KERN_ERR "vegenere: Failed to allocate memory for device_info\n");
             return -ENOMEM;
         }
         filp->private_data = di;
@@ -160,7 +196,7 @@ int my_open(struct inode *inode, struct file *filp)
 
         struct minor_di *new_minor_di = (struct minor_di*)kmalloc(sizeof(struct minor_di), GFP_KERNEL);
         if (!new_minor_di) {
-            printk(KERN_ERR "vegenere: Memory allocation for minor_di failed\n");
+            printk(KERN_ERR "vegenere: Failed to allocate memory for minor_di\n");
             kfree(di);
             return -ENOMEM;
         }
@@ -170,10 +206,11 @@ int my_open(struct inode *inode, struct file *filp)
         list_add_tail(&new_minor_di->l_idx, &inode_list);
     }
 
-    if (!di->data){
+    if (!di->data) {
+        printk(KERN_INFO "vegenere: Allocating data buffer\n");
         di->data = (char*)kmalloc(32 * sizeof(char), GFP_KERNEL);
         if (!di->data) {
-            printk(KERN_ERR "vegenere: Memory allocation for data buffer failed\n");
+            printk(KERN_ERR "vegenere: Failed to allocate memory for data buffer\n");
             return -ENOMEM;
         }
         di->i_mem_end = 32;
@@ -184,6 +221,7 @@ int my_open(struct inode *inode, struct file *filp)
     return 0;
 }
 
+
 /* Release function */
 int my_release(struct inode *inode, struct file *filp)
 {
@@ -191,23 +229,36 @@ int my_release(struct inode *inode, struct file *filp)
 
     struct device_info *di = (struct device_info *)filp->private_data;
 
-    // Perform any necessary cleanup
     if (di) {
-        if (di->data) {
-            kfree(di->data);
-        }
-        if (di->key) {
-            kfree(di->key);
-        }
-        kfree(di);
+        printk(KERN_INFO "vegenere: Valid device_info structure\n");
 
-        // Reset the private_data to NULL
+        if (di->data) {
+            printk(KERN_INFO "vegenere: Freeing data buffer\n");
+            kfree(di->data);
+            di->data = NULL;
+        } else {
+            printk(KERN_INFO "vegenere: Data buffer already NULL\n");
+        }
+
+        if (di->key) {
+            printk(KERN_INFO "vegenere: Freeing key buffer\n");
+            kfree(di->key);
+            di->key = NULL;
+        } else {
+            printk(KERN_INFO "vegenere: Key buffer already NULL\n");
+        }
+
+        printk(KERN_INFO "vegenere: Freeing device_info structure\n");
+        kfree(di);
         filp->private_data = NULL;
+    } else {
+        printk(KERN_INFO "vegenere: device_info structure is NULL\n");
     }
 
     printk(KERN_INFO "vegenere: Device released\n");
     return 0;
 }
+
 
 /* Read function */
 ssize_t my_read(struct file *filp, char *buf, size_t count, loff_t *f_pos)
