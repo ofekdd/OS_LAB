@@ -7,8 +7,14 @@ import struct
 import os
 import errno
 
+#
+# Globals
+#
 DEVICE_PATH = '/dev/vegenere'
 
+#
+# Utilities for calculating the IOCTL command codes.
+#
 sizeof = {
     'byte': calcsize('c'),
     'signed byte': calcsize('b'),
@@ -68,31 +74,33 @@ def add_null(key):
 def main():
     """Test the device driver"""
     
+    #
+    # Calculate the ioctl cmd number
+    #
     MY_MAGIC = 'r'
     SET_KEY = _IOW(MY_MAGIC, 0, 'int')
     RESET = _IO(MY_MAGIC, 1)
     DEBUG = _IOW(MY_MAGIC, 2, 'int')
 
-    print("Opening device file...")
+    # Open the device file
     f = os.open(DEVICE_PATH, os.O_RDWR)
-    print("Device file opened.")
-
-    print("Setting encryption key...")
+    
+    # Set a key
     fcntl.ioctl(f, SET_KEY, add_null("abc"))
-    print("Encryption key set.")
 
+    # Write a message
     message = 'Hello'
-    print("Writing message: %s" % message)
     os.write(f, message)
 
-    print("Reading message back...")
-    read_message = os.read(f, 10).decode('utf-8')
-    print("Read message: %s" % read_message)
+    # Read back the same message. Notice that we request more bytes than we must.
+    read_message = os.read(f, 10)
+    
+    # Messages should be identical
+    assert (message == read_message)
 
-    assert message == read_message, "Read message does not match written message!"
-
-    print("Test passed. Closing device file.")
+    # Finaly close the device file
     os.close(f)
 
+    
 if __name__ == '__main__':
     main()
